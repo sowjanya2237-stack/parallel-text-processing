@@ -22,10 +22,8 @@ SENDER_PASSWORD = "fyis cnux ctxn fflq"
 
 st.set_page_config(page_title="Parallel System Pro", page_icon="⚡", layout="wide")
 
-if 'uploader_key' not in st.session_state:
-    st.session_state.uploader_key = 0
-if 'uploaded_data_list' not in st.session_state:
-    st.session_state.uploaded_data_list = None
+if 'uploader_key' not in st.session_state: st.session_state.uploader_key = 0
+if 'uploaded_data_list' not in st.session_state: st.session_state.uploaded_data_list = None
 
 # --- 2. CUSTOM UI CSS ---
 st.markdown("""
@@ -58,65 +56,44 @@ with st.sidebar:
 # --- 4. PAGE 1: FILE PORTAL ---
 if page == "File Portal":
     st.markdown("<p class='instruction-text'>SELECT A DOCUMENT TO BEGIN PROCESSING</p>", unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("Upload Data", type=["txt", "csv"], label_visibility="collapsed", key=f"uploader_{st.session_state.uploader_key}")
-
+    uploaded_file = st.file_uploader("Upload", type=["txt", "csv"], label_visibility="collapsed", key=f"uploader_{st.session_state.uploader_key}")
     if uploaded_file is not None:
         file_ext = uploaded_file.name.split('.')[-1].lower()
         if st.session_state.uploaded_data_list is None:
-            with st.spinner("Analyzing file structure..."):
+            with st.spinner("Analyzing structure..."):
                 if file_ext == "csv":
-                    df = pd.read_csv(uploaded_file)
-                    st.dataframe(df.head(5), use_container_width=True)
-                    cols = df.columns.tolist()
-                    default_ix = 0
-                    for i, c in enumerate(cols):
-                        if any(x in c.lower() for x in ["text", "review", "body", "content"]):
-                            default_ix = i
-                            break
-                    target_col = st.selectbox("Select the Column containing Text", cols, index=default_ix)
+                    df_preview = pd.read_csv(uploaded_file, nrows=5); st.dataframe(df_preview, use_container_width=True) 
+                    uploaded_file.seek(0); cols = pd.read_csv(uploaded_file, nrows=0).columns.tolist()
+                    target_col = st.selectbox("Select Text Column", cols, index=0)
                     if st.button("CONFIRM DATASET"):
-                        st.session_state.uploaded_data_list = df[target_col].astype(str).tolist()
-                        st.success(f"CSV BUFFERED: {len(st.session_state.uploaded_data_list):,} rows loaded.")
+                        uploaded_file.seek(0); df = pd.read_csv(uploaded_file, usecols=[target_col])
+                        st.session_state.uploaded_data_list = df[target_col].dropna().astype(str).tolist()
                 else:
                     raw_text = uploaded_file.getvalue().decode("utf-8", errors="ignore")
-                    st.session_state.uploaded_data_list = raw_text.splitlines()
-                    st.success(f"TXT BUFFERED: {len(st.session_state.uploaded_data_list):,} lines loaded.")
-                    st.rerun()
-
+                    st.session_state.uploaded_data_list = [l.strip() for l in raw_text.splitlines() if l.strip()]
+            st.rerun()
         if st.session_state.uploaded_data_list:
-            st.info(f"Portal Connected: {uploaded_file.name} | Buffer Size: {len(st.session_state.uploaded_data_list):,} rows")
             if st.button("CLEAR WORKSPACE"):
-                st.session_state.uploaded_data_list = None
-                st.session_state.uploader_key += 1
-                st.rerun()
+                st.session_state.uploaded_data_list = None; st.session_state.uploader_key += 1; st.rerun()
 
 # --- 5. PAGE 2: PROCESS ENGINE ---
 elif page == "Process Engine":
-    st.markdown("<p class='instruction-text'>INITIALIZE ANALYSIS SEQUENCE</p>", unsafe_allow_html=True)
+    st.markdown("<p class='instruction-text'>INITIALIZE ANALYSIS SEQUENCE<</p>", unsafe_allow_html=True)
     if st.session_state.uploaded_data_list:
         data = st.session_state.uploaded_data_list
         st.info(f"Target Workload: {len(data):,} entries.")
-        if st.button("RUN PARALLEL SCORING"):
-            start_time = time.time()
-            chunk_size = 10000
-            chunks = [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
-            with st.status("Distributing tasks to CPU cores...", expanded=True) as status:
-                with ProcessPoolExecutor() as executor:
-                    results_nested = list(executor.map(analyze_chunk, chunks))
+        if st.button("RUN SCORING ENGINE (TURBO)"):
+            start_time = time.time(); c_size = 50000; chunks = [data[i:i + c_size] for i in range(0, len(data), c_size)]
+            with st.status("Initializing Cores...", expanded=True) as status:
+                with ProcessPoolExecutor() as executor: results_nested = list(executor.map(analyze_chunk, chunks))
                 final_flat = [item for sublist in results_nested for item in sublist]
-                conn = sqlite3.connect(DB_NAME)
-                conn.execute("PRAGMA journal_mode = OFF")
-                conn.execute("PRAGMA synchronous = OFF")
-                cursor = conn.cursor()
-                cursor.execute("CREATE TABLE IF NOT EXISTS results (text TEXT, score INTEGER, sentiment TEXT, timestamp TEXT)")
+                conn = sqlite3.connect(DB_NAME); conn.execute("PRAGMA journal_mode = WAL"); conn.execute("PRAGMA synchronous = OFF")
+                cursor = conn.cursor(); cursor.execute("CREATE TABLE IF NOT EXISTS results (text TEXT, score INTEGER, sentiment TEXT, timestamp TEXT)")
                 cursor.executemany("INSERT INTO results (text, score, sentiment, timestamp) VALUES (?, ?, ?, ?)", final_flat)
-                conn.commit()
-                conn.close()
-                status.update(label="Parallel Run Successful", state="complete")
-            st.success(f"PROCESSED {len(final_flat):,} RECORDS IN {time.time() - start_time:.2f} SECONDS")
+                conn.commit(); conn.close(); status.update(label="Sync Complete", state="complete")
+            st.success(f"PROCESSED {len(final_flat):,} RECORDS IN {time.time() - start_time:.2f}s")
             st.dataframe(pd.DataFrame(final_flat[:50], columns=["text", "score", "sentiment", "timestamp"]), use_container_width=True)
-    else:
-        st.warning("Buffer empty. Visit File Portal.")
+    else: st.warning("Buffer empty.")
 
 # --- 6. PAGE 3: REGISTRY VAULT ---
 elif page == "Registry Vault":
@@ -125,103 +102,105 @@ elif page == "Registry Vault":
         conn = sqlite3.connect(DB_NAME)
         total_rec = conn.execute("SELECT COUNT(*) FROM results").fetchone()[0]
         db_df_preview = pd.read_sql_query("SELECT * FROM results ORDER BY rowid DESC LIMIT 500", conn)
-        df_sent = pd.read_sql_query("SELECT sentiment FROM results", conn)
-        conn.close()
-
-        # FIXED SYNTAX (Line 128 Fix)
+        df_sent = pd.read_sql_query("SELECT sentiment FROM results", conn); conn.close()
         m1, m2, m3 = st.columns(3)
-        with m1:
-            st.metric("VAULT TOTAL", f"{total_rec:,}")
-        with m2:
-            st.metric("REGISTRY STATUS", "ACTIVE")
-        with m3:
-            st.metric("ENCRYPTION", "VERIFIED")
-
-        st.markdown("### Latest Registry Matrix")
-        st.dataframe(db_df_preview, use_container_width=True, height=400)
-        
+        with m1: st.metric("VAULT TOTAL", f"{total_rec:,}")
+        with m2: st.metric("REGISTRY STATUS", "ACTIVE")
+        with m3: st.metric("ENCRYPTION", "VERIFIED")
+        st.markdown("### Latest Registry Matrix"); st.dataframe(db_df_preview, use_container_width=True, height=400)
         if not df_sent.empty:
-            st.markdown("---")
-            st.markdown("### Sentiment Distribution Analysis")
-            col_l, col_chart, col_r = st.columns([1, 2, 1])
-            with col_chart:
-                counts = df_sent['sentiment'].value_counts().reset_index()
-                counts.columns = ['Sentiment', 'Count']
-                fig = px.pie(counts, values='Count', names='Sentiment', hole=0.6,
-                             color='Sentiment', color_discrete_map={'Positive': '#00ffcc', 'Negative': '#ff0066', 'Neutral': '#888888'}, height=350)
+            st.markdown("---"); st.markdown("### Sentiment Distribution Analysis")
+            cl, cc, cr = st.columns([1, 2, 1])
+            with cc:
+                counts = df_sent['sentiment'].value_counts().reset_index(); counts.columns = ['Sentiment', 'Count']
+                fig = px.pie(counts, values='Count', names='Sentiment', hole=0.6, color='Sentiment', color_discrete_map={'Positive': '#00ffcc', 'Negative': '#ff0066', 'Neutral': '#888888'}, height=350)
                 fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color='white', margin=dict(t=20, b=20, l=0, r=0), legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"))
                 st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.error("Vault not found.")
+    else: st.error("Vault not found.")
 
 # --- 7. PAGE 4: REPORT DISTRIBUTION ---
 elif page == "Report Distribution":
     st.markdown("<p class='instruction-text'>DISPATCH SYSTEM INTELLIGENCE</p>", unsafe_allow_html=True)
     
-    # Dataset Export
     st.markdown("### 📥 Dataset Export")
     if os.path.exists(DB_NAME):
         if st.button("PREPARE ENTIRE VAULT FOR DOWNLOAD"):
-            with st.status("Streaming high-speed CSV buffer...", expanded=True) as status:
-                conn = sqlite3.connect(DB_NAME)
-                cursor = conn.cursor()
-                cursor.execute("SELECT * FROM results")
-                output = io.StringIO()
-                writer = csv.writer(output)
-                writer.writerow([i[0] for i in cursor.description])
+            with st.status("Streaming high-speed CSV...", expanded=True) as status:
+                conn = sqlite3.connect(DB_NAME); cursor = conn.cursor(); cursor.execute("SELECT * FROM results")
+                output = io.StringIO(); writer = csv.writer(output); writer.writerow([i[0] for i in cursor.description])
                 while True:
                     rows = cursor.fetchmany(50000)
                     if not rows: break
                     writer.writerows(rows)
-                conn.close()
-                csv_bytes = output.getvalue().encode('utf-8')
-                output.close()
-                status.update(label="Export Buffer Ready", state="complete")
+                conn.close(); csv_bytes = output.getvalue().encode('utf-8'); output.close()
+                status.update(label="Ready!", state="complete")
                 st.download_button("📥 DOWNLOAD COMPLETE DATABASE (.CSV)", csv_bytes, "CORE_VAULT_EXPORT.csv", "text/csv")
     
     st.markdown("---")
-    
-    # Email Section
-    st.markdown("### 📧 Email Summary Report")
+    st.markdown("### 📧 Detailed Analysis Email")
     receiver_email = st.text_input("Enter Destination Email Address", placeholder="client@example.com")
     
-    if st.button("DISPATCH EMAIL SUMMARY"):
-        if not receiver_email:
-            st.error("Provide a valid email.")
+    if st.button("DISPATCH INTELLIGENCE SUMMARY"):
+        if not receiver_email: st.error("Provide email.")
         else:
-            with st.status("Compiling Multi-Format Report...", expanded=True) as status:
+            with st.status("Generating Comprehensive Report...", expanded=True) as status:
                 try:
-                    conn = sqlite3.connect(DB_NAME)
-                    cursor = conn.cursor()
+                    # 1. FETCH SUMMARY DATA & SAMPLES
+                    conn = sqlite3.connect(DB_NAME); cursor = conn.cursor()
                     total = cursor.execute("SELECT COUNT(*) FROM results").fetchone()[0]
-                    sent_data = cursor.execute("SELECT sentiment, COUNT(*) FROM results GROUP BY sentiment").fetchall()
-                    c_dict = {row[0]: row[1] for row in sent_data}
+                    s_data = cursor.execute("SELECT sentiment, COUNT(*) FROM results GROUP BY sentiment").fetchall()
+                    c_dict = {row[0]: row[1] for row in s_data}
+                    
+                    # Fetch real examples for the email content as requested
+                    pos_samples = cursor.execute("SELECT text FROM results WHERE sentiment='Positive' LIMIT 3").fetchall()
+                    neg_samples = cursor.execute("SELECT text FROM results WHERE sentiment='Negative' LIMIT 3").fetchall()
+                    neu_samples = cursor.execute("SELECT text FROM results WHERE sentiment='Neutral' LIMIT 3").fetchall()
                     conn.close()
                     
-                    pos, neg, neu = c_dict.get('Positive', 0), c_dict.get('Negative', 0), c_dict.get('Neutral', 0)
+                    # 2. CHART IMAGE
                     chart_df = pd.DataFrame([{'Sentiment': k, 'Count': v} for k, v in c_dict.items()])
                     fig = px.pie(chart_df, values='Count', names='Sentiment', hole=0.6, color='Sentiment', color_discrete_map={'Positive': '#00ffcc', 'Negative': '#ff0066', 'Neutral': '#888888'})
                     img_bytes = fig.to_image(format="png")
 
-                    msg = MIMEMultipart()
-                    msg['From'] = SENDER_EMAIL
-                    msg['To'] = receiver_email
-                    msg['Subject'] = f"Intelligence Report - {datetime.now().strftime('%Y-%m-%d')}"
-                    body = f"SYSTEM SUMMARY:\nTotal Records: {total:,}\n- Positive: {pos:,}\n- Negative: {neg:,}\n- Neutral: {neu:,}\n\nFull dataset available via app."
-                    msg.attach(MIMEText(body, 'plain'))
+                    # 3. CONSTRUCT DETAILED EMAIL CONTENT
+                    msg = MIMEMultipart(); msg['From'] = SENDER_EMAIL; msg['To'] = receiver_email
+                    msg['Subject'] = f"System Intelligence Report - {datetime.now().strftime('%Y-%m-%d')}"
                     
-                    p_img = MIMEBase('application', 'octet-stream')
-                    p_img.set_payload(img_bytes)
-                    encoders.encode_base64(p_img)
-                    p_img.add_header('Content-Disposition', 'attachment; filename="chart.png"')
-                    msg.attach(p_img)
+                    p_c, n_c, nu_c = c_dict.get('Positive', 0), c_dict.get('Negative', 0), c_dict.get('Neutral', 0)
+                    
+                    email_body = f"""
+SYSTEM ANALYSIS OVERVIEW:
+-------------------------
+We have successfully processed the entire dataset stored in the vault. 
+Here are the findings from the total of {total:,} records:
 
-                    srv = smtplib.SMTP('smtp.gmail.com', 587)
-                    srv.starttls()
-                    srv.login(SENDER_EMAIL, SENDER_PASSWORD)
-                    srv.send_message(msg)
-                    srv.quit()
+1. POSITIVE REVIEWS: {p_c:,} ({(p_c/total*100):.1f}%)
+Sample Highlights:
+{chr(10).join([f"- {s[0][:120]}..." for s in pos_samples])}
+
+2. NEGATIVE REVIEWS: {n_c:,} ({(n_c/total*100):.1f}%)
+Sample Highlights:
+{chr(10).join([f"- {s[0][:120]}..." for s in neg_samples])}
+
+3. NEUTRAL REVIEWS: {nu_c:,} ({(nu_c/total*100):.1f}%)
+Sample Highlights:
+{chr(10).join([f"- {s[0][:120]}..." for s in neu_samples])}
+
+CONCLUSION:
+A visual distribution chart is attached for your reference. 
+The complete line-by-line scoring database is available for download within the system portal.
+
+Automated report generated by Parallel System Pro.
+                    """
+                    msg.attach(MIMEText(email_body, 'plain'))
+                    
+                    # Attach Pie Chart Image
+                    p_img = MIMEBase('application', 'octet-stream'); p_img.set_payload(img_bytes); encoders.encode_base64(p_img)
+                    p_img.add_header('Content-Disposition', 'attachment; filename="analysis_chart.png"'); msg.attach(p_img)
+
+                    # 4. SEND
+                    srv = smtplib.SMTP('smtp.gmail.com', 587); srv.starttls(); srv.login(SENDER_EMAIL, SENDER_PASSWORD)
+                    srv.send_message(msg); srv.quit()
                     status.update(label="Dispatch Successful!", state="complete")
-                    st.success(f"Report summary sent to {receiver_email}")
-                except Exception as e:
-                    st.error(f"Dispatch Error: {e}")
+                    st.success(f"Report for {total:,} records sent to {receiver_email}")
+                except Exception as e: st.error(f"Error: {e}")
