@@ -1,99 +1,227 @@
 import streamlit as st
+import pandas as pd
+import sqlite3
+import time
+import os
+import io
+import csv
+import plotly.express as px 
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor
+from workers import analyze_chunk
 
-# --- 1. PAGE CONFIG ---
-st.set_page_config(page_title="Text Processor", page_icon="📝", layout="wide")
+# --- 1. CONFIGURATION ---
+DB_NAME = "CORE_VAULT.db"
+SENDER_EMAIL = "sowjanya2237@gmail.com" 
+SENDER_PASSWORD = "fyis cnux ctxn fflq" 
 
-# --- 2. INITIALIZE SESSION STATE (For the Clear Button) ---
+st.set_page_config(page_title="Parallel System Pro", page_icon="⚡", layout="wide")
+
 if 'uploader_key' not in st.session_state:
     st.session_state.uploader_key = 0
+if 'uploaded_data_list' not in st.session_state:
+    st.session_state.uploaded_data_list = None
 
-def reset_uploader():
-    # Incrementing the key forces Streamlit to create a "fresh" uploader widget
-    st.session_state.uploader_key += 1
-
-# --- 3. CUSTOM CSS ---
+# --- 2. CUSTOM UI CSS ---
 st.markdown("""
     <style>
-    .stApp {
-        background: radial-gradient(circle at 50% -20%, #2b1055 0%, #050505 60%);
-        color: #ffffff;
+    .stApp { background: radial-gradient(circle at 50% -20%, #2b1055 0%, #050505 60%); color: #ffffff; }
+    [data-testid="stSidebar"] { background-color: #080808; border-right: 1px solid #1f1f1f; }
+    .main .block-container { max-width: 1000px; padding-top: 5rem; }
+    .instruction-text { text-align: center; color: #888888; font-size: 1.1rem; margin-bottom: 2rem; letter-spacing: 1px; }
+    [data-testid="stFileUploader"] { background-color: #0c0c0c; border: 1px solid #1f1f1f; border-radius: 12px; padding: 40px; }
+    div.stButton > button:first-child, div.stDownloadButton > button:first-child { 
+        background: linear-gradient(180deg, #ffffff 0%, #e0e0e0 100%) !important; 
+        color: #000000 !important; border: none !important; border-radius: 6px !important; 
+        padding: 0.8rem !important; font-weight: 800 !important; width: 100%; 
+        box-shadow: 0 4px 15px rgba(255, 255, 255, 0.1);
     }
-    .main .block-container {
-        max-width: 900px;
-        padding-top: 8rem; 
-    }
-    .instruction-text {
-        text-align: center;
-        color: #888888;
-        font-size: 1.1rem;
-        margin-bottom: 2rem;
-        letter-spacing: 1px;
-    }
-    [data-testid="stFileUploader"] {
-        background-color: #0c0c0c;
-        border: 1px solid #1f1f1f;
-        border-radius: 12px;
-        padding: 40px;
-    }
-    [data-testid="stFileUploader"]:hover {
-        border: 1px solid #7d2ae8;
-        box-shadow: 0px 0px 20px rgba(125, 42, 232, 0.1);
-    }
-    div.stButton > button:first-child {
-        background-color: #ffffff !important;
-        color: #000000 !important;
-        border: none !important;
-        border-radius: 6px !important;
-        padding: 0.5rem 2rem !important;
-        font-weight: 600 !important;
-    }
-    .stTextArea textarea {
-        background-color: #080808 !important;
-        color: #ffffff !important;
-        border: 1px solid #1f1f1f !important;
-        border-radius: 8px;
-    }
-    hr {
-        border-top: 1px solid #1f1f1f;
-        margin: 3rem 0;
-    }
+    div.stButton > button:first-child:hover, div.stDownloadButton > button:first-child:hover { background: #ffffff !important; }
+    [data-testid="stMetric"] { background-color: #0c0c0c; border: 1px solid #1f1f1f; padding: 20px; border-radius: 10px; }
+    [data-testid="stDataFrame"] { background-color: #0c0c0c; border-radius: 10px; border: 1px solid #1f1f1f; }
+    hr { border-top: 1px solid #1f1f1f; margin: 2rem 0; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 4. UI CONTENT ---
-
-st.markdown("<p class='instruction-text'>SELECT A DOCUMENT TO BEGIN PROCESSING</p>", unsafe_allow_html=True)
-
-# Create the uploader with a dynamic key
-uploaded_file = st.file_uploader(
-    "Document Upload", 
-    type="txt", 
-    label_visibility="collapsed", 
-    key=f"uploader_{st.session_state.uploader_key}"
-)
-
-if uploaded_file is not None:
-    try:
-        # Read file
-        content = uploaded_file.getvalue().decode("utf-8")
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # Content box
-        st.text_area(label="Viewer", value=content, height=450, label_visibility="collapsed")
-        
-        # Action button to Clear
-        if st.button("CLEAR"):
-            reset_uploader() # Update the key
-            st.rerun()      # Refresh the page to show empty uploader
-
-    except Exception as e:
-        st.error(f"System Error: {e}")
-
-else:
-    # Minimalist Footer
-    st.markdown("<div style='height: 200px;'></div>", unsafe_allow_html=True) 
+# --- 3. NAVIGATION ---
+with st.sidebar:
+    st.markdown("<h2 style='color:white; letter-spacing:2px;'>CORE SYSTEM</h2>", unsafe_allow_html=True)
+    page = st.radio("Navigate", ["File Portal", "Process Engine", "Registry Vault", "Report Distribution"])
     st.markdown("---")
-    f1, f2, f3 = st.columns(3)
-    with f1: st.markdown("<p style='color:#333; font-size:12px;'>ENCRYPTED PORTAL</p>", unsafe_allow_html=True)
-    with f2: st.markdown("<p style='color:#333; font-size:12px; text-align:center;'>STATUS: READY</p>", unsafe_allow_html=True)
-    with f3: st.markdown("<p style='color:#333; font-size:12px; text-align:right;'>V.2.1.0</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='color:#00ffcc; font-family:monospace; font-size:14px; font-weight:bold;'>DATABASE: {DB_NAME}</p>", unsafe_allow_html=True)
+
+# --- 4. PAGE 1: FILE PORTAL ---
+if page == "File Portal":
+    st.markdown("<p class='instruction-text'>SELECT A DOCUMENT TO BEGIN PROCESSING</p>", unsafe_allow_html=True)
+    uploaded_file = st.file_uploader("Upload Data", type=["txt", "csv"], label_visibility="collapsed", key=f"uploader_{st.session_state.uploader_key}")
+
+    if uploaded_file is not None:
+        file_ext = uploaded_file.name.split('.')[-1].lower()
+        if st.session_state.uploaded_data_list is None:
+            with st.spinner("Analyzing file structure..."):
+                if file_ext == "csv":
+                    df = pd.read_csv(uploaded_file)
+                    st.dataframe(df.head(5), use_container_width=True)
+                    cols = df.columns.tolist()
+                    default_ix = 0
+                    for i, c in enumerate(cols):
+                        if any(x in c.lower() for x in ["text", "review", "body", "content"]):
+                            default_ix = i
+                            break
+                    target_col = st.selectbox("Select the Column containing Text", cols, index=default_ix)
+                    if st.button("CONFIRM DATASET"):
+                        st.session_state.uploaded_data_list = df[target_col].astype(str).tolist()
+                        st.success(f"CSV BUFFERED: {len(st.session_state.uploaded_data_list):,} rows loaded.")
+                else:
+                    raw_text = uploaded_file.getvalue().decode("utf-8", errors="ignore")
+                    st.session_state.uploaded_data_list = raw_text.splitlines()
+                    st.success(f"TXT BUFFERED: {len(st.session_state.uploaded_data_list):,} lines loaded.")
+                    st.rerun()
+
+        if st.session_state.uploaded_data_list:
+            st.info(f"Portal Connected: {uploaded_file.name} | Buffer Size: {len(st.session_state.uploaded_data_list):,} rows")
+            if st.button("CLEAR WORKSPACE"):
+                st.session_state.uploaded_data_list = None
+                st.session_state.uploader_key += 1
+                st.rerun()
+
+# --- 5. PAGE 2: PROCESS ENGINE ---
+elif page == "Process Engine":
+    st.markdown("<p class='instruction-text'>INITIALIZE ANALYSIS SEQUENCE</p>", unsafe_allow_html=True)
+    if st.session_state.uploaded_data_list:
+        data = st.session_state.uploaded_data_list
+        st.info(f"Target Workload: {len(data):,} entries.")
+        if st.button("RUN PARALLEL SCORING"):
+            start_time = time.time()
+            chunk_size = 10000
+            chunks = [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
+            with st.status("Distributing tasks to CPU cores...", expanded=True) as status:
+                with ProcessPoolExecutor() as executor:
+                    results_nested = list(executor.map(analyze_chunk, chunks))
+                final_flat = [item for sublist in results_nested for item in sublist]
+                conn = sqlite3.connect(DB_NAME)
+                conn.execute("PRAGMA journal_mode = OFF")
+                conn.execute("PRAGMA synchronous = OFF")
+                cursor = conn.cursor()
+                cursor.execute("CREATE TABLE IF NOT EXISTS results (text TEXT, score INTEGER, sentiment TEXT, timestamp TEXT)")
+                cursor.executemany("INSERT INTO results (text, score, sentiment, timestamp) VALUES (?, ?, ?, ?)", final_flat)
+                conn.commit()
+                conn.close()
+                status.update(label="Parallel Run Successful", state="complete")
+            st.success(f"PROCESSED {len(final_flat):,} RECORDS IN {time.time() - start_time:.2f} SECONDS")
+            st.dataframe(pd.DataFrame(final_flat[:50], columns=["text", "score", "sentiment", "timestamp"]), use_container_width=True)
+    else:
+        st.warning("Buffer empty. Visit File Portal.")
+
+# --- 6. PAGE 3: REGISTRY VAULT ---
+elif page == "Registry Vault":
+    st.markdown("<p class='instruction-text'>CENTRAL REGISTRY RECORDS</p>", unsafe_allow_html=True)
+    if os.path.exists(DB_NAME):
+        conn = sqlite3.connect(DB_NAME)
+        total_rec = conn.execute("SELECT COUNT(*) FROM results").fetchone()[0]
+        db_df_preview = pd.read_sql_query("SELECT * FROM results ORDER BY rowid DESC LIMIT 500", conn)
+        df_sent = pd.read_sql_query("SELECT sentiment FROM results", conn)
+        conn.close()
+
+        # FIXED SYNTAX (Line 128 Fix)
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric("VAULT TOTAL", f"{total_rec:,}")
+        with m2:
+            st.metric("REGISTRY STATUS", "ACTIVE")
+        with m3:
+            st.metric("ENCRYPTION", "VERIFIED")
+
+        st.markdown("### Latest Registry Matrix")
+        st.dataframe(db_df_preview, use_container_width=True, height=400)
+        
+        if not df_sent.empty:
+            st.markdown("---")
+            st.markdown("### Sentiment Distribution Analysis")
+            col_l, col_chart, col_r = st.columns([1, 2, 1])
+            with col_chart:
+                counts = df_sent['sentiment'].value_counts().reset_index()
+                counts.columns = ['Sentiment', 'Count']
+                fig = px.pie(counts, values='Count', names='Sentiment', hole=0.6,
+                             color='Sentiment', color_discrete_map={'Positive': '#00ffcc', 'Negative': '#ff0066', 'Neutral': '#888888'}, height=350)
+                fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color='white', margin=dict(t=20, b=20, l=0, r=0), legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"))
+                st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.error("Vault not found.")
+
+# --- 7. PAGE 4: REPORT DISTRIBUTION ---
+elif page == "Report Distribution":
+    st.markdown("<p class='instruction-text'>DISPATCH SYSTEM INTELLIGENCE</p>", unsafe_allow_html=True)
+    
+    # Dataset Export
+    st.markdown("### 📥 Dataset Export")
+    if os.path.exists(DB_NAME):
+        if st.button("PREPARE ENTIRE VAULT FOR DOWNLOAD"):
+            with st.status("Streaming high-speed CSV buffer...", expanded=True) as status:
+                conn = sqlite3.connect(DB_NAME)
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM results")
+                output = io.StringIO()
+                writer = csv.writer(output)
+                writer.writerow([i[0] for i in cursor.description])
+                while True:
+                    rows = cursor.fetchmany(50000)
+                    if not rows: break
+                    writer.writerows(rows)
+                conn.close()
+                csv_bytes = output.getvalue().encode('utf-8')
+                output.close()
+                status.update(label="Export Buffer Ready", state="complete")
+                st.download_button("📥 DOWNLOAD COMPLETE DATABASE (.CSV)", csv_bytes, "CORE_VAULT_EXPORT.csv", "text/csv")
+    
+    st.markdown("---")
+    
+    # Email Section
+    st.markdown("### 📧 Email Summary Report")
+    receiver_email = st.text_input("Enter Destination Email Address", placeholder="client@example.com")
+    
+    if st.button("DISPATCH EMAIL SUMMARY"):
+        if not receiver_email:
+            st.error("Provide a valid email.")
+        else:
+            with st.status("Compiling Multi-Format Report...", expanded=True) as status:
+                try:
+                    conn = sqlite3.connect(DB_NAME)
+                    cursor = conn.cursor()
+                    total = cursor.execute("SELECT COUNT(*) FROM results").fetchone()[0]
+                    sent_data = cursor.execute("SELECT sentiment, COUNT(*) FROM results GROUP BY sentiment").fetchall()
+                    c_dict = {row[0]: row[1] for row in sent_data}
+                    conn.close()
+                    
+                    pos, neg, neu = c_dict.get('Positive', 0), c_dict.get('Negative', 0), c_dict.get('Neutral', 0)
+                    chart_df = pd.DataFrame([{'Sentiment': k, 'Count': v} for k, v in c_dict.items()])
+                    fig = px.pie(chart_df, values='Count', names='Sentiment', hole=0.6, color='Sentiment', color_discrete_map={'Positive': '#00ffcc', 'Negative': '#ff0066', 'Neutral': '#888888'})
+                    img_bytes = fig.to_image(format="png")
+
+                    msg = MIMEMultipart()
+                    msg['From'] = SENDER_EMAIL
+                    msg['To'] = receiver_email
+                    msg['Subject'] = f"Intelligence Report - {datetime.now().strftime('%Y-%m-%d')}"
+                    body = f"SYSTEM SUMMARY:\nTotal Records: {total:,}\n- Positive: {pos:,}\n- Negative: {neg:,}\n- Neutral: {neu:,}\n\nFull dataset available via app."
+                    msg.attach(MIMEText(body, 'plain'))
+                    
+                    p_img = MIMEBase('application', 'octet-stream')
+                    p_img.set_payload(img_bytes)
+                    encoders.encode_base64(p_img)
+                    p_img.add_header('Content-Disposition', 'attachment; filename="chart.png"')
+                    msg.attach(p_img)
+
+                    srv = smtplib.SMTP('smtp.gmail.com', 587)
+                    srv.starttls()
+                    srv.login(SENDER_EMAIL, SENDER_PASSWORD)
+                    srv.send_message(msg)
+                    srv.quit()
+                    status.update(label="Dispatch Successful!", state="complete")
+                    st.success(f"Report summary sent to {receiver_email}")
+                except Exception as e:
+                    st.error(f"Dispatch Error: {e}")
