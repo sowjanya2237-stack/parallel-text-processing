@@ -120,7 +120,7 @@ elif page == "Registry Vault":
     if os.path.exists(DB_NAME):
         conn = sqlite3.connect(DB_NAME)
         st.markdown("### 🔍 Registry Filter")
-        f_choice = st.selectbox("Select results", ["All Records", "Positive", "Negative", "Neutral", "Spam", "Toxic", "Urgent", "Suggestion"])
+        f_choice = st.selectbox("Select results", ["All Records", "Positive", "Negative", "Neutral", "Spam", "Abusive", "Urgent", "Suggestion"])
         query = "SELECT * FROM results" if f_choice == "All Records" else f"SELECT * FROM results WHERE sentiment='{f_choice}'"
         db_df = pd.read_sql_query(f"{query} ORDER BY rowid DESC LIMIT 500", conn)
         df_sent = pd.read_sql_query("SELECT sentiment FROM results", conn); conn.close()
@@ -129,7 +129,7 @@ elif page == "Registry Vault":
             st.markdown("---"); st.markdown("### Sentiment Analysis")
             cl, cc, cr = st.columns([1, 2, 1])
             with cc:
-                fig = px.pie(df_sent['sentiment'].value_counts().reset_index(), values='count', names='sentiment', hole=0.6, color='sentiment', color_discrete_map={'Positive': '#00ffcc', 'Negative': '#ff0066', 'Neutral': '#888888', 'Spam': '#ffaa00', 'Toxic': '#ff0000', 'Urgent': '#ff4b4b', 'Suggestion': '#636efa'}, height=350)
+                fig = px.pie(df_sent['sentiment'].value_counts().reset_index(), values='count', names='sentiment', hole=0.6, color='sentiment', color_discrete_map={'Positive': '#00ffcc', 'Negative': '#ff0066', 'Neutral': '#888888', 'Spam': '#ffaa00', 'Abusive': '#ff0000', 'Urgent': '#ff4b4b', 'Suggestion': '#636efa'}, height=350)
                 fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color='white', margin=dict(t=20, b=20, l=0, r=0), legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"))
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -161,13 +161,13 @@ elif page == "Report Distribution":
                     c_dict = {row[0]: row[1] for row in s_data}
                     
                     # Fetch highlights for ALL categories
-                    categories = ["Positive", "Negative", "Neutral", "Urgent", "Toxic", "Spam", "Suggestion"]
+                    categories = ["Positive", "Negative", "Neutral", "Urgent", "Abusive", "Spam", "Suggestion"]
                     samples = {cat: cursor.execute(f"SELECT text FROM results WHERE sentiment='{cat}' LIMIT 3").fetchall() for cat in categories}
                     
                     df_sample_att = pd.read_sql_query("SELECT * FROM results ORDER BY rowid DESC LIMIT 1000", conn); conn.close()
                     
                     chart_df = pd.DataFrame([{'S': k, 'C': v} for k,v in c_dict.items()])
-                    fig = px.pie(chart_df, values='C', names='S', hole=0.6, color='S', color_discrete_map={'Positive': '#00ffcc', 'Negative': '#ff0066', 'Neutral': '#888888', 'Spam': '#ffaa00', 'Toxic': '#ff0000', 'Urgent': '#ff4b4b', 'Suggestion': '#636efa'})
+                    fig = px.pie(chart_df, values='C', names='S', hole=0.6, color='S', color_discrete_map={'Positive': '#00ffcc', 'Negative': '#ff0066', 'Neutral': '#888888', 'Spam': '#ffaa00', 'Abusive': '#ff0000', 'Urgent': '#ff4b4b', 'Suggestion': '#636efa'})
                     img_bytes = fig.to_image(format="png")
 
                     msg = MIMEMultipart(); msg['From'] = SENDER_EMAIL; msg['To'] = receiver_email; msg['Subject'] = f"Full System Intelligence Report - {datetime.now().strftime('%Y-%m-%d')}"

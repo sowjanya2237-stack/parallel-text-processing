@@ -8,7 +8,7 @@ neg_set = {"bad", "worst", "poor", "terrible", "hate", "awful", "disappointed", 
 regex_rules = {
     # URGENT
     r"lawsuit": 300, r"suing": 300, r"legal\s+action": 300, r"urgent\s+help": 300,
-    # TOXIC
+    # ABUSIVE
     r"shut\s+up": 200, r"idiot": 200, r"stupid": 200, r"f\*\*\*": 200, r"s\*\*\*": 200,
     # SPAM
     r"click\s+here": 100, r"buy\s+now": 100, r"promo\s+code": 100, r"http\S+": 100,
@@ -96,7 +96,7 @@ def analyze_chunk(chunk):
             
             # Categorization takes priority
             if weight == 300: category = "Urgent"; break
-            if weight == 200: category = "Toxic"; break
+            if weight == 200: category = "Abusive"; break
             if weight == 100: category = "Spam"; break
             if weight == 50:  category = "Suggestion"; break
             
