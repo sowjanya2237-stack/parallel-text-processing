@@ -5,7 +5,7 @@ import time
 import os
 import io
 import csv
-import plotly.express as px 
+import plotly.express as px
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -73,7 +73,7 @@ def run_app():
                         sample = df[target_col].dropna().head(100).astype(str)
 
                         if pd.api.types.is_numeric_dtype(df[target_col]) or sample.str.len().mean() < 15:
-                            st.error(f"🛑 INVALID SELECTION: '{target_col}' is numerical or too short.")
+                            st.error(f" INVALID SELECTION: '{target_col}' is numerical or too short.")
                         else:
                             if st.button("CONFIRM DATASET"):
                                 st.session_state.uploaded_data_list = df[target_col].dropna().astype(str).tolist()
