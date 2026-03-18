@@ -63,7 +63,7 @@ def run_app():
 
         if uploaded_file is not None:
             if st.session_state.uploaded_data_list is None:
-                with st.spinner("Analyzing dataset structure..."):
+                with st.spinner("Analyzing dataset structure......."):
                     try:
                         df = pd.read_csv(uploaded_file, sep=",")
                         st.markdown("### Data Preview")
@@ -97,37 +97,46 @@ def run_app():
 
             if st.button("RUN"):
                 import multiprocessing
-
+                from concurrent.futures import ProcessPoolExecutor
+                
                 start_time = time.time()
-
-                c_size = 100000
-
+                
+                c_size = 10000
                 chunks = [(i, data[i:i + c_size]) for i in range(0, len(data), c_size)]
-
-                with st.status("processing...", expanded=True) as status:
-                    conn = sqlite3.connect(DB_NAME)
-
+                
+                with st.status("processing.......", expanded=True) as status:
+                    conn = sqlite3.connect(DB_NAME, timeout=30)
+                    
                     conn.execute("PRAGMA journal_mode = WAL")
                     conn.execute("PRAGMA synchronous = OFF")
                     conn.execute("PRAGMA temp_store = MEMORY")
-                    conn.execute("PRAGMA cache_size = 1000000")
-                    conn.execute("PRAGMA locking_mode = EXCLUSIVE") 
-
+                    conn.execute("PRAGMA busy_timeout = 30000")
+                    
                     cursor = conn.cursor()
                     cursor.execute("DROP TABLE IF EXISTS results")
                     cursor.execute("CREATE TABLE results (text TEXT, score INTEGER, sentiment TEXT, timestamp TEXT)")
-
-                    with ProcessPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
-                        for batch_result in executor.map(analyze_chunk, chunks, chunksize=2):
-                            payload = [(data[r[0]], r[1], r[2], r[3]) for r in batch_result]
-                            cursor.executemany("INSERT INTO results VALUES (?, ?, ?, ?)", payload)
-
+                    
+                    if len(data) < 10000:
+                        results = []
+                        for chunk in chunks:
+                            results.extend(analyze_chunk(chunk))
+                    
+                    else:
+                        workers = max(1, multiprocessing.cpu_count() - 1)
+                        with ProcessPoolExecutor(max_workers=workers) as executor:
+                            results = []
+                            for res in executor.map(analyze_chunk, chunks):
+                                results.extend(res)
+                                
+                    payload = [(data[r[0]], r[1], r[2], r[3]) for r in results]
+                    
+                    cursor.executemany("INSERT INTO results VALUES (?, ?, ?, ?)", payload)
+                    
                     conn.commit()
                     conn.close()
-                    status.update(label="Completed", state="complete")
-
-                st.success(f" PROCESSED {len(data):,} RECORDS IN {(time.time() - start_time):.2f}s")
-
+                    
+                    st.success(f" PROCESSED {len(data):,} RECORDS IN {(time.time() - start_time):.2f}s")
+                    
         else:
             st.warning("PLEASE UPLOAD A FILE")
     
@@ -143,7 +152,7 @@ def run_app():
             df_sent = pd.read_sql_query("SELECT sentiment FROM results", conn); conn.close()
             
             st.markdown(f"### Registry Matrix ({f_choice})")
-            st.dataframe(db_df_preview, use_container_width=True, height=400)
+            st.dataframe(db_df_preview, width="stretch", height=400)
             
             if not df_sent.empty:
                 st.markdown("---"); st.markdown("### Sentiment Distribution Analysis")
@@ -153,7 +162,7 @@ def run_app():
                     fig = px.pie(counts, values='C', names='S', hole=0.6, color='S', 
                                 color_discrete_map={'Positive': '#00ffcc', 'Negative': '#ff0066', 'Neutral': '#888888', 'Spam': '#ffaa00', 'Abusive': '#ff0000', 'Urgent': '#ff4b4b', 'Suggestion': '#636efa'}, height=350)
                     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color='white', margin=dict(t=20, b=20, l=0, r=0), legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"))
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                     
     # --- PAGE 4: REPORT DISTRIBUTION ---
     elif page == "Report Distribution":
@@ -176,7 +185,7 @@ def run_app():
         if st.button("DISPATCH REPORT"):
             if not receiver_email: st.error("Provide email.")
             else:
-                with st.status("Compiling Report...", expanded=True) as status:
+                with st.status("Compiling Report......", expanded=True) as status:
                     try:
                         conn = sqlite3.connect(DB_NAME); cursor = conn.cursor()
                         total = cursor.execute("SELECT COUNT(*) FROM results").fetchone()[0]
@@ -219,7 +228,7 @@ A visual distribution chart is attached. A sample CSV database is also attached.
                         
                         srv = smtplib.SMTP('smtp.gmail.com', 587); srv.starttls(); srv.login(SENDER_EMAIL, SENDER_PASSWORD)
                         srv.send_message(msg); srv.quit()
-                        status.update(label="Dispatch Successful!", state="complete"); st.success(f"Full intelligence report sent to {receiver_email}")
+                        status.update(label="Dispatch Successful!", state="complete"); st.success(f" Report sent to {receiver_email}")
                     except Exception as e: st.error(f"Error: {e}")
 
 if __name__ == "__main__":
