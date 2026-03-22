@@ -1,7 +1,6 @@
 import re
 from datetime import datetime
 
-# 🔥 WORD-LEVEL SENTIMENT (FAST)
 pos_set = {
     "good","great","excellent","amazing","love","awesome",
     "fantastic","perfect","nice","satisfied","delicious",
@@ -14,7 +13,7 @@ neg_set = {
     "mushy","expensive"
 }
 
-# 🚀 CATEGORY REGEX
+# REGEX RULES
 URGENT_RE = re.compile(
     r"lawsuit|suing|legal\s+action|urgent\s+help|hospital|poisoned|allergic\s+reaction|choking\s+hazard|fire\s+hazard|reporting\s+to\s+police|refund\s+immediately",
     re.IGNORECASE
@@ -35,7 +34,7 @@ SUGGEST_RE = re.compile(
     re.IGNORECASE
 )
 
-# 🔥 POSITIVE PATTERNS (FULL LIST)
+# POSITIVE PATTERNS
 POS_PATTERNS = [
     (r"super\s+smooth", 2), (r"very\s+yummy", 2), (r"perfect\s+for\s+kombucha", 2),
     (r"fits\s+perfectly", 3), (r"light\s+weight", 2), (r"very\s+pigmented", 2),
@@ -52,7 +51,7 @@ POS_PATTERNS = [
 
 POS_REGEX = [(re.compile(p, re.IGNORECASE), w) for p, w in POS_PATTERNS]
 
-# 🔥 NEGATIVE PATTERNS (FULL LIST)
+# NEGATIVE PATTERNS
 NEG_PATTERNS = [
     (r"very\s+flimsy", -3), (r"cheap(ly)?\s+made", -3), (r"parts\s+missing", -3),
     (r"came\s+with\s+parts\s+missing", -3), (r"wont\s+stick", -3), (r"won'?t\s+stick", -3),
@@ -66,7 +65,7 @@ NEG_PATTERNS = [
 
 NEG_REGEX = [(re.compile(p, re.IGNORECASE), w) for p, w in NEG_PATTERNS]
 
-# 🚀 MAIN FUNCTION
+# MAIN FUNCTION
 def analyze_chunk(chunk_data):
     start_idx, lines = chunk_data
     results = []
@@ -80,7 +79,7 @@ def analyze_chunk(chunk_data):
             results.append((start_idx + i, 0, "Neutral", ts))
             continue
 
-        # 🔥 STEP 1: WORD-LEVEL SENTIMENT
+        # STEP 1: SENTIMENT
         pos_hits = 0
         neg_hits = 0
 
@@ -92,13 +91,13 @@ def analyze_chunk(chunk_data):
 
         score = pos_hits - neg_hits
 
-        # 🚀 STEP 2: FAST DECISION
+        #  STEP 2: DECISION
         if score != 0:
             category = "Positive" if score > 0 else "Negative"
             results.append((start_idx + i, score, category, ts))
             continue
 
-        # 🚀 STEP 3: PRIORITY CATEGORY
+        # STEP 3: PRIORITY CATEGORY
         if URGENT_RE.search(text_lower):
             category = "Urgent"
 
@@ -111,7 +110,7 @@ def analyze_chunk(chunk_data):
         elif SUGGEST_RE.search(text_lower):
             category = "Suggestion"
 
-        # 🚀 STEP 4: REGEX SENTIMENT
+        # STEP 4: REGEX SENTIMENT
         if not category:
             # POSITIVE
             for pattern, weight in POS_REGEX:
@@ -128,7 +127,6 @@ def analyze_chunk(chunk_data):
                     category = "Negative"
                     break
 
-        # 🔥 FINAL FALLBACK
         if not category:
             category = "Neutral"
 
